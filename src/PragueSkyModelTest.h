@@ -10,6 +10,7 @@
 #include <math.h>
 
 #include "PragueSkyModel.h"
+#include "RealtimePragueSkyModel.h"
 
 
 using Vector3  = PragueSkyModel::Vector3;

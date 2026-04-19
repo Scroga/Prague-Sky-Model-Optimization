@@ -97,6 +97,7 @@ set(PRAGUESKYMODELGUI_SRC
     thirdparty/imgui/backends/imgui_impl_sdl.cpp
     thirdparty/imgui/backends/imgui_impl_opengl2.cpp
     src/PragueSkyModel.cpp
+    src/RealtimePragueSkyModel.cpp
     src/PragueSkyModelTestGui.cpp
 )
 

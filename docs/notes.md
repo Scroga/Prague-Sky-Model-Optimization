@@ -1,0 +1,1 @@
+Optimize computeParameters method as well as skyRadiance method
