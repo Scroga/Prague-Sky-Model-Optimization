@@ -458,11 +458,239 @@ void RealtimePragueSkyModel::readRadiance(FILE* handle, const double singleVisib
 				valsRead = fread(metadataRad.emphBreaks.data(), sizeof(double), emphBreaksCount, handle);
 				if (valsRead != emphBreaksCount)
 								throw DatasetReadException("emphBreaksRad");
+
+				// Calculate offsets and strides.
+
+				metadataRad.sunOffset = 0;
+				metadataRad.sunStride = metadataRad.sunBreaks.size() + metadataRad.zenithBreaks.size();
+
+				metadataRad.zenithOffset = metadataRad.sunOffset + metadataRad.sunBreaks.size();
+				metadataRad.zenithStride = metadataRad.sunStride;
+
+				metadataRad.emphOffset = metadataRad.sunOffset + metadataRad.rank * metadataRad.sunStride;
+
+				metadataRad.totalCoefsSingleConfig =
+								metadataRad.emphOffset + metadataRad.emphBreaks.size(); // this is for one specific configuration
+				metadataRad.totalCoefsAllConfigs = metadataRad.totalCoefsSingleConfig * totalConfigs;
+
+				// Read data.
+
+				// Structure of the data part of the data file:
+				// [[[[[[ sunCoefsRad       (sunBreaksCountRad * half), zenithScale (1 * double), 
+				//        zenithCoefsRad (zenithBreaksCountRad * half) ] * rankRad, 
+				//        emphCoefsRad     (emphBreaksCountRad * half) ]
+				//  * channels ] * elevationCount ] * altitudeCount ] * albedoCount ] * visibilityCount
+
+				int offset = 0;
+				dataRad.resize(metadataRad.totalCoefsAllConfigs);
+
+				std::vector<uint16> radianceTemp;
+				radianceTemp.resize(std::max(metadataRad.sunBreaks.size(),
+								std::max(metadataRad.zenithBreaks.size(), metadataRad.emphBreaks.size())));
+
+				size_t oneConfigByteCount =
+								((metadataRad.sunBreaks.size() + metadataRad.zenithBreaks.size()) * sizeof(uint16) + sizeof(double)) *
+								metadataRad.rank +
+								metadataRad.emphBreaks.size() * sizeof(uint16);
+
+				// If a single visibility was requested, skip all configurations from the beginning till those needed for
+				// the requested visibility.
+				fseek(handle, oneConfigByteCount* skippedConfigsBegin, SEEK_CUR);
+
+				// Read configurations needed for the requested visibility (or all if none requested).
+				for (int con = 0; con < totalConfigs; ++con) {
+								for (int r = 0; r < metadataRad.rank; ++r) {
+												// Read sun params.
+												valsRead = fread(radianceTemp.data(), sizeof(uint16), metadataRad.sunBreaks.size(), handle);
+												if (valsRead != metadataRad.sunBreaks.size())
+																throw DatasetReadException("sunCoefsRad");
+
+												// Unpack sun params from half.
+												for (int i = 0; i < metadataRad.sunBreaks.size(); ++i) {
+																dataRad[offset++] = float(doubleFromHalf(radianceTemp[i]));
+												}
+
+												// Read scaling factor for zenith params.
+												double zenithScale;
+												valsRead = fread(&zenithScale, sizeof(double), 1, handle);
+												if (valsRead != 1)
+																throw DatasetReadException("zenithScaleRad");
+
+												// Read zenith params.
+												valsRead = fread(radianceTemp.data(), sizeof(uint16), metadataRad.zenithBreaks.size(), handle);
+												if (valsRead != metadataRad.zenithBreaks.size())
+																throw DatasetReadException("zenithCoefsRad");
+
+												// Unpack zenith params from half (these need additional rescaling).
+												for (int i = 0; i < metadataRad.zenithBreaks.size(); ++i) {
+																dataRad[offset++] = float(doubleFromHalf(radianceTemp[i]) / zenithScale);
+												}
+								}
+
+								// Read emphasize params.
+								valsRead = fread(radianceTemp.data(), sizeof(uint16), metadataRad.emphBreaks.size(), handle);
+								if (valsRead != metadataRad.emphBreaks.size())
+												throw DatasetReadException("emphCoefsRad");
+
+								// Unpack emphasize params from half.
+								for (int i = 0; i < metadataRad.emphBreaks.size(); ++i) {
+												dataRad[offset++] = float(doubleFromHalf(radianceTemp[i]));
+								}
+				}
+
+				// Skip remaining configurations till the end.
+				fseek(handle, oneConfigByteCount * skippedConfigsEnd, SEEK_CUR);
 }
 
-void RealtimePragueSkyModel::readTransmittance(FILE* handle) {}
+void RealtimePragueSkyModel::readTransmittance(FILE* handle) {
+				// Read metadata
 
-void RealtimePragueSkyModel::readPolarisation(FILE* handle) {}
+				size_t valsRead;
+
+				valsRead = fread(&dDim, sizeof(int), 1, handle);
+				if (valsRead != 1 || dDim < 1)
+								throw DatasetReadException("dDim");
+
+				valsRead = fread(&aDim, sizeof(int), 1, handle);
+				if (valsRead != 1 || aDim < 1)
+								throw DatasetReadException("aDim");
+
+				int visibilitiesCount = 0;
+				valsRead = fread(&visibilitiesCount, sizeof(int), 1, handle);
+				if (valsRead != 1 || visibilitiesCount < 1)
+								throw DatasetReadException("visibilitiesCountTrans");
+
+				int altitudesCount = 0;
+				valsRead = fread(&altitudesCount, sizeof(int), 1, handle);
+				if (valsRead != 1 || altitudesCount < 1)
+								throw DatasetReadException("altitudesCountTrans");
+
+				valsRead = fread(&rankTrans, sizeof(int), 1, handle);
+				if (valsRead != 1 || rankTrans < 1)
+								throw DatasetReadException("rankTrans");
+
+				std::vector<float> temp;
+				temp.resize(std::max(altitudesCount, visibilitiesCount));
+
+				altitudesTrans.resize(altitudesCount);
+				valsRead = fread(temp.data(), sizeof(float), altitudesCount, handle);
+				if (valsRead != altitudesCount)
+								throw DatasetReadException("altitudesTrans");
+				for (int i = 0; i < altitudesCount; i++) {
+								altitudesTrans[i] = double(temp[i]);
+				}
+
+				visibilitiesTrans.resize(visibilitiesCount);
+				valsRead = fread(temp.data(), sizeof(float), visibilitiesCount, handle);
+				if (valsRead != visibilitiesCount)
+								throw DatasetReadException("visibilitiesTrans");
+				for (int i = 0; i < visibilitiesCount; i++) {
+								visibilitiesTrans[i] = double(temp[i]);
+				}
+
+				const size_t totalCoefsU = dDim * aDim * rankTrans * altitudesTrans.size();
+				const size_t totalCoefsV = visibilitiesTrans.size() * rankTrans * channels * altitudesTrans.size();
+
+				// Read data
+
+				dataTransU.resize(totalCoefsU);
+				valsRead = fread(dataTransU.data(), sizeof(float), totalCoefsU, handle);
+				if (valsRead != totalCoefsU)
+								throw DatasetReadException("datasetTransU");
+
+				dataTransV.resize(totalCoefsV);
+				valsRead = fread(dataTransV.data(), sizeof(float), totalCoefsV, handle);
+				if (valsRead != totalCoefsV)
+								throw DatasetReadException("datasetTransV");
+}
+
+void RealtimePragueSkyModel::readPolarisation(FILE* handle) {
+				// Read metadata.
+
+				// Structure of the metadata part of the data file:
+				// rankPol              (1 * int), 
+				// sunBreaksCountPol    (1 * int), sunBreaksPol    (sunBreaksCountPol * double),
+				// zenithBreaksCountPol (1 * int), zenithBreaksPol (zenithBreaksCountPol * double), 
+
+				size_t valsRead;
+
+				valsRead = fread(&metadataPol.rank, sizeof(int), 1, handle);
+				if (valsRead != 1) {
+								// Polarisation dataset not present
+								metadataPol.rank = 0;
+								return;
+				}
+
+				int sunBreaksCount = 0;
+				valsRead = fread(&sunBreaksCount, sizeof(int), 1, handle);
+				if (valsRead != 1 || sunBreaksCount < 1)
+								throw DatasetReadException("sunBreaksCountPol");
+
+				metadataPol.sunBreaks.resize(sunBreaksCount);
+				valsRead = fread(metadataPol.sunBreaks.data(), sizeof(double), sunBreaksCount, handle);
+				if (valsRead != sunBreaksCount)
+								throw DatasetReadException("sunBreaksPol");
+
+				int zenithBreaksCount = 0;
+				valsRead = fread(&zenithBreaksCount, sizeof(int), 1, handle);
+				if (valsRead != 1 || zenithBreaksCount < 1)
+								throw DatasetReadException("zenithBreaksCountPol");
+
+				metadataPol.zenithBreaks.resize(zenithBreaksCount);
+				valsRead = fread(metadataPol.zenithBreaks.data(), sizeof(double), zenithBreaksCount, handle);
+				if (valsRead != zenithBreaksCount)
+								throw DatasetReadException("zenithBreaksPol");
+
+				metadataPol.emphBreaks.clear();
+
+				// Calculate offsets and strides.
+
+				metadataPol.sunOffset = 0;
+				metadataPol.sunStride = metadataPol.sunBreaks.size() + metadataPol.zenithBreaks.size();
+
+				metadataPol.zenithOffset = metadataPol.sunOffset + metadataPol.sunBreaks.size();
+				metadataPol.zenithStride = metadataPol.sunStride;
+
+				metadataPol.emphOffset = 0;
+
+				metadataPol.totalCoefsSingleConfig =
+								metadataPol.sunOffset +
+								metadataPol.rank * metadataPol.sunStride; // this is for one specific configuration
+				metadataPol.totalCoefsAllConfigs = metadataPol.totalCoefsSingleConfig * totalConfigs;
+
+				// Read data.
+
+				// Structure of the data part of the data file:
+				// [[[[[[ sunCoefsPol       (sunBreaksCountPol * float), 
+				//        zenithCoefsPol (zenithBreaksCountPol * float) ] * rankPol] 
+				// * channels ] * elevationCount ] * altitudeCount ] * albedoCount ] * visibilityCount
+
+				size_t offset = 0;
+				dataPol.resize(metadataPol.totalCoefsAllConfigs);
+
+				size_t oneConfigByteCount =
+								(metadataPol.sunBreaks.size() + metadataPol.zenithBreaks.size()) * sizeof(float) * metadataPol.rank;
+
+				// If a single visibility was requested, skip all configurations from the beginning till those needed for
+				// the requested visibility.
+				fseek(handle, oneConfigByteCount * skippedConfigsBegin, SEEK_CUR);
+
+				for (int con = 0; con < totalConfigs; ++con) {
+								for (int r = 0; r < metadataPol.rank; ++r) {
+												// Read sun params.
+												valsRead = fread(dataPol.data() + offset, sizeof(float), metadataPol.sunBreaks.size(), handle);
+												if (valsRead != metadataPol.sunBreaks.size())
+																throw DatasetReadException("sunCoefsPol");
+												offset += metadataPol.sunBreaks.size();
+
+												// Read zenith params.
+												valsRead = fread(dataPol.data() + offset, sizeof(float), metadataPol.zenithBreaks.size(), handle);
+												if (valsRead != metadataPol.zenithBreaks.size())
+																throw DatasetReadException("zenithCoefsPol");
+												offset += metadataPol.zenithBreaks.size();
+								}
+				}
+}
 
 /////////////////////////////////////////////////////////////////////////////////////
 // Initialization
@@ -507,3 +735,14 @@ RealtimePragueSkyModel::AvailableData RealtimePragueSkyModel::getAvailableData()
 /////////////////////////////////////////////////////////////////////////////////////
 // Filling the Parameters structure
 /////////////////////////////////////////////////////////////////////////////////////
+
+RealtimePragueSkyModel::Parameters RealtimePragueSkyModel::computeParameters(
+				const Vector3& viewpoint,
+				const Vector3& viewDirection,
+				const double   groundLevelSolarElevationAtOrigin,
+				const double   groundLevelSolarAzimuthAtOrigin,
+				const double   visibility,
+				const double   albedo) const {
+
+
+}
