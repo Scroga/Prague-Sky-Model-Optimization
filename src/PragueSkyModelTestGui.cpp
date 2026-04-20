@@ -21,6 +21,7 @@
 // For GUI.
 #include <chrono>
 #include <sstream>
+#include <format>
 #include "imgui.h"
 #include "imfilebrowser.h"
 #ifdef _WIN32
@@ -277,9 +278,12 @@ void errorMarker(const char* desc) {
 /////////////////////////////////////////////////////////////////////////////////////
 
 int main(int argc, char* argv[]) {
-    PragueSkyModel                  skyModel;
-    std::vector<std::vector<float>> result;
-    void*                           texture = NULL;
+    PragueSkyModel                   originalSkyModel;
+    Realtime::RealtimePragueSkyModel realtimeSkyModel;
+    std::vector<std::vector<float>> originalResult;
+    std::vector<std::vector<float>> realtimeResult;
+    void*                           textureOriginal  = NULL;
+    void*                           textureRealtime = NULL;
     const char* modes[] = { "Sky radiance", "Sun radiance", "Polarisation", "Transmittance" };
     const char* views[] = { "Up-facing fisheye", "Side-facing fisheye" };
     char        label[150];
@@ -306,7 +310,7 @@ int main(int argc, char* argv[]) {
     available.channelWidth  = SPECTRUM_STEP;
 
     // The full window and the input subwindow dimensions.
-    const int windowWidthFull  = 1200;
+    const int windowWidthFull  = 1600;
     const int windowHeightFull = 800;
 #ifdef _WIN32
     const int         windowWidthInput  = 440;
@@ -473,7 +477,8 @@ int main(int argc, char* argv[]) {
         static bool        rendered           = false;
         static bool        rendering          = false;
         static std::string renderError        = "";
-        static long long   renderTime         = 0;
+        static long long   originalRenderTime = 0;
+        static long long   realtimeRenderTime = 0;
         static bool        saved              = false;
         static std::string saveError          = "";
         static bool        updateTexture      = false;
@@ -540,9 +545,10 @@ int main(int argc, char* argv[]) {
                         singleVisibility = 0.0;
                         break;
                     }
-                    skyModel.initialize(datasetPath, singleVisibility);
+                    originalSkyModel.initialize(datasetPath, singleVisibility);
+                    realtimeSkyModel.initialize(datasetPath, singleVisibility);
                     loaded    = true;
-                    available = skyModel.getAvailableData();
+                    available = originalSkyModel.getAvailableData();
                 } catch (std::exception& e) {
                     loadError = e.what();
                     loaded    = false;
@@ -687,20 +693,40 @@ int main(int argc, char* argv[]) {
             // Render button
             if (rendering) {
                 try {
-                    // Render and measure how long it takes
-                    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-                    render(skyModel,
-                           albedo,
-                           altitude,
-                           azimuth,
-                           elevation,
-                           Mode(mode),
-                           resolution,
-                           View(view),
-                           visibility,
-                           result);
-                    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-                    renderTime = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
+                    // Render and measure how long it takes to compute original model
+                    {
+                        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+                        render<PragueSkyModel>(originalSkyModel,
+                            albedo,
+                            altitude,
+                            azimuth,
+                            elevation,
+                            Mode(mode),
+                            resolution,
+                            View(view),
+                            visibility,
+                            originalResult);
+                        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+                        originalRenderTime = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
+                    }
+
+                    // Render and measure how long it takes to compute realtime model
+                    {
+                        std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+                        render<Realtime::RealtimePragueSkyModel>(realtimeSkyModel,
+                            albedo,
+                            altitude,
+                            azimuth,
+                            elevation,
+                            Mode(mode),
+                            resolution,
+                            View(view),
+                            visibility,
+                            realtimeResult);
+                        std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+                        realtimeRenderTime = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
+                    }
+
                     rendered   = true;
                     updateTexture      = true;
                     renderedResolution = resolution;
@@ -720,8 +746,22 @@ int main(int argc, char* argv[]) {
             if (rendered && !rendering) {
                 ImGui::SameLine();
                 std::ostringstream out;
-                out << "OK (" << renderTime << " ms)";
-                ImGui::Text(out.str().c_str());
+                out << "OK\n";
+
+                if (realtimeRenderTime > 0) {
+                    double speedup = static_cast<double>(originalRenderTime) / static_cast<double>(realtimeRenderTime);
+                    out << std::format("Original: {} ms\nRealtime: {} ms\nSpeedup: {:.2f}x",
+                        originalRenderTime,
+                        realtimeRenderTime,
+                        speedup);
+                }
+                else {
+                    out << std::format("Original: {} ms\nRealtime: {} ms\nSpeedup: <1 ms realtime",
+                        originalRenderTime,
+                        realtimeRenderTime);
+                }
+
+                ImGui::TextUnformatted(out.str().c_str());
             } else if (!renderError.empty() && !rendering) {
                 ImGui::SameLine();
                 errorMarker(renderError.c_str());
@@ -829,7 +869,7 @@ int main(int argc, char* argv[]) {
             // Save button
             if (ImGui::Button("Save")) {
                 const char* err = NULL;
-                const int   ret = SaveEXR(result[channel].data(),
+                const int   ret = SaveEXR(originalResult[channel].data(),
                                         renderedResolution,
                                         renderedResolution,
                                         channel == 0 ? 3 : 1,
@@ -907,19 +947,29 @@ int main(int argc, char* argv[]) {
 
             // Update the texture if needed
             if (updateTexture) {
-                convertToTexture(result[channel], renderedResolution, exposure, channel > 0, &texture);
+                convertToTexture(originalResult[channel], renderedResolution, exposure, channel > 0, &textureOriginal);
+                convertToTexture(realtimeResult[channel], renderedResolution, exposure, channel > 0, &textureRealtime);
             }
 
             // Display the texture in the center of the window
-            ImVec2 diplaySize = ImVec2(renderedResolution * zoom, renderedResolution * zoom);
+            ImVec2 displaySize = ImVec2(renderedResolution * zoom, renderedResolution * zoom);
+            float spacing = 10.0f; // space between images
+
             ImVec2 windowSize = ImGui::GetWindowSize();
             ImVec2 initialPos = ImGui::GetCursorPos();
-            ImVec2 centerPos =
-                ImVec2((windowSize.x - diplaySize.x) * 0.5f, (windowSize.y - diplaySize.y) * 0.5f);
-            centerPos = ImVec2(std::max(centerPos.x, initialPos.x), std::max(centerPos.y, initialPos.y));
-            ImGui::SetCursorPos(centerPos);
-            if (texture) {
-                ImGui::Image(texture, diplaySize);
+
+            float totalWidth = displaySize.x * 2.0f + spacing;
+            ImVec2 startPos(
+                (windowSize.x - totalWidth) * 0.5f,
+                (windowSize.y - displaySize.y) * 0.5f
+            );
+
+            startPos = ImVec2(std::max(startPos.x, initialPos.x), std::max(startPos.y, initialPos.y));
+            ImGui::SetCursorPos(startPos);
+            if (textureOriginal && textureRealtime) {
+                ImGui::Image(textureOriginal, displaySize);
+                ImGui::SameLine(0.0f, spacing);
+                ImGui::Image(textureRealtime, displaySize);
             }
 
             ImGui::End();
