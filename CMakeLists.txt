@@ -23,7 +23,7 @@ if(WIN32)
 set(PRAGUESKYMODEL_SRC
     thirdparty/miniz/miniz.c
     src/original/PragueSkyModel.cpp
-    src/realtime/RealtimePragueSkyModel.cpp
+    src/realtime/RealtimeSkyModel.cpp
     src/PragueSkyModelTestCli.cpp
 )
 
@@ -48,7 +48,7 @@ set(PRAGUESKYMODELGUI_SRC
     thirdparty/imgui/backends/imgui_impl_dx11.cpp
     thirdparty/imgui/backends/imgui_impl_win32.cpp
     src/original/PragueSkyModel.cpp
-    src/realtime/RealtimePragueSkyModel.cpp
+    src/realtime/RealtimeSkyModel.cpp
     src/PragueSkyModelTestGui.cpp
 )
 
@@ -76,7 +76,7 @@ find_package(TBB REQUIRED)
 set(PRAGUESKYMODEL_SRC
     thirdparty/miniz/miniz.c
     src/original/PragueSkyModel.cpp
-    src/realtime/RealtimePragueSkyModel.cpp
+    src/realtime/RealtimeSkyModel.cpp
     src/PragueSkyModelTestCli.cpp
 )
 
@@ -106,7 +106,7 @@ set(PRAGUESKYMODELGUI_SRC
     thirdparty/imgui/backends/imgui_impl_sdl.cpp
     thirdparty/imgui/backends/imgui_impl_opengl2.cpp
     src/original/PragueSkyModel.cpp
-    src/realtime/RealtimePragueSkyModel.cpp
+    src/realtime/RealtimeSkyModel.cpp
     src/PragueSkyModelTestGui.cpp
 )
 

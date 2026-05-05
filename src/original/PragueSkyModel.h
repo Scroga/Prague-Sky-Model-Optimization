@@ -1,12 +1,13 @@
 // Copyright 2022 Charles University
 // SPDX-License-Identifier: Apache-2.0
+#pragma once
 
 #include <exception>
 #include <string>
 #include <vector>
 #include <cmath>
 
-double lerp(const double from, const double to, const double factor);
+#include "../PragueSkyModelCommon.h"
 
 /// Implementation of the physically-based sky model presented by Wilkie et al. [2021]
 /// (https://cgg.mff.cuni.cz/publications/skymodel-2021/) and Vevoda et al. [2022]. Improves on previous work
@@ -39,191 +40,7 @@ double lerp(const double from, const double to, const double factor);
 /// simple Vector3 class to simplify working with points and directions and expects using this class when
 /// passing viewing point and direction to the computeParameters method.
 class PragueSkyModel {
-
-
-/////////////////////////////////////////////////////////////////////////////////////
-// Public types
-/////////////////////////////////////////////////////////////////////////////////////
-public:
-    /// Exception thrown by the initialize method if the passed dataset file could not be found.
-    class DatasetNotFoundException : public std::exception {
-    private:
-        const std::string message;
-
-    public:
-        DatasetNotFoundException(const std::string& filename)
-            : message(std::string("Dataset file ") + filename + std::string(" not found")) {}
-
-        virtual const char* what() const throw() { return message.c_str(); }
-    };
-
-    /// Exception thrown by the initialize method if an error occurred while reading the passed dataset file.
-    class DatasetReadException : public std::exception {
-    private:
-        const std::string message;
-
-    public:
-        DatasetReadException(const std::string& parameterName)
-            : message(std::string("Dataset reading failed at ") + parameterName) {}
-
-        virtual const char* what() const throw() { return message.c_str(); }
-    };
-
-    /// Exception thrown by the polarisation method if the dataset passed to the initialize method does not
-    /// contain polarisation data.
-    class NoPolarisationException : public std::exception {
-    private:
-        const std::string message;
-
-    public:
-        NoPolarisationException()
-            : message(std::string("The supplied dataset does not contain polarisation data")) {}
-
-        virtual const char* what() const throw() { return message.c_str(); }
-    };
-
-    /// Exception thrown when using the model without calling the initialize method first.
-    class NotInitializedException : public std::exception {
-    private:
-        const std::string message;
-
-    public:
-        NotInitializedException()
-            : message(std::string("The model is not initialized")) {}
-
-        virtual const char* what() const throw() { return message.c_str(); }
-    };
-
-    /// A simple 3D vector implementation. Provides some basic operations.
-    class Vector3 {
-    public:
-        double x, y, z;
-
-        Vector3() {
-            this->x = 0.0;
-            this->y = 0.0;
-            this->z = 0.0;
-        }
-
-        Vector3(double x, double y, double z) {
-            this->x = x;
-            this->y = y;
-            this->z = z;
-        }
-
-        Vector3 operator+(const Vector3& other) const {
-            return Vector3(x + other.x, y + other.y, z + other.z);
-        }
-        Vector3 operator-(const Vector3& other) const {
-            return Vector3(x - other.x, y - other.y, z - other.z);
-        }
-
-        Vector3 operator*(const double factor) const { return Vector3(x * factor, y * factor, z * factor); }
-
-        Vector3 operator/(const double factor) const { return Vector3(x / factor, y / factor, z / factor); }
-
-        bool isZero() const { return x == 0.0 && y == 0.0 && z == 0.0; }
-    };
-
-    /// Structure holding all parameters necessary for querying the model.
-    struct Parameters {
-        /// Angle between view direction and direction to zenith in radians, supported values in range [0,
-        /// PI].
-        double theta;
-
-        /// Angle between view direction and direction to sun in radians, supported values in range [0, PI].
-        double gamma;
-
-        /// Altitude-corrected angle between view direction and direction perpendicular to a shadow plane (=
-        /// direction to sun rotated PI / 2 towards direction to zenith) in radians, used for negative solar
-        /// elevations only, supported values in range [0, PI]
-        double shadow;
-
-        /// Altitude-corrected version of the theta angle in radians, supported values in range [0, PI].
-        double zero;
-
-        /// Sun elevation at view point in radians, supported values in range [-0.073, PI/2] (for full
-        /// dataset). For view points above ground differs from the ground level sun elevation expected by the
-        /// computeParameters method.
-        double elevation;
-
-        /// Altitude of view point in meters, supported values in range [0, 15000] (for full dataset).
-        double altitude;
-
-        /// Horizontal visibility (meteorological range) at ground level in kilometers, supported values in
-        /// range [20, 131.8] (for full dataset).
-        double visibility;
-
-        /// Ground albedo, supported values in range [0, 1] (for full dataset).
-        double albedo;
-    };
-
-    /// Structure with parameter ranges available in currently loaded dataset.
-    struct AvailableData {
-        double albedoMin;
-        double albedoMax;
-        double altitudeMin;
-        double altitudeMax;
-        double elevationMin;
-        double elevationMax;
-        double visibilityMin;
-        double visibilityMax;
-        bool   polarisation;
-        int    channels;
-        double channelStart;
-        double channelWidth;
-    };
-
-
-/////////////////////////////////////////////////////////////////////////////////////
-// Private types
-/////////////////////////////////////////////////////////////////////////////////////
 private:
-    /// Structure holding index and factor for interpolating with respect to two neighboring values of an
-    /// array.
-    struct InterpolationParameter {
-        double factor;
-        int    index;
-    };
-
-    /// Angles converted into interpolation parameters.
-    struct AngleParameters {
-        InterpolationParameter gamma, alpha, zero;
-    };
-
-    /// Structure controlling interpolation with respect to visibility, albedo, altitude and elevation.
-    struct ControlParameters {
-        /// 16 sets of parameters that will be bi-linearly interpolated
-        std::array<std::vector<float>::const_iterator, 16> coefficients;
-        std::array<double, 4>                              interpolationFactor;
-    };
-
-    /// Structure used for storing radiance and polarisation metadata.
-    struct Metadata {
-        int rank;
-
-        int                 sunOffset;
-        int                 sunStride;
-        std::vector<double> sunBreaks;
-
-        int                 zenithOffset;
-        int                 zenithStride;
-        std::vector<double> zenithBreaks;
-
-        int                 emphOffset; // not used for polarisation
-        std::vector<double> emphBreaks; // not used for polarisation
-
-        int totalCoefsSingleConfig;
-        int totalCoefsAllConfigs;
-	};
-
-	/// Transmittance model internal parameters.
-	struct TransmittanceParameters {
-		InterpolationParameter altitude;
-		InterpolationParameter distance;
-	};
-
-
 /////////////////////////////////////////////////////////////////////////////////////
 // Private data
 /////////////////////////////////////////////////////////////////////////////////////

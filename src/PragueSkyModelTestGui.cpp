@@ -17,7 +17,6 @@
 
 // For using the sky model.
 #include "PragueSkyModelTest.h"
-
 // For GUI.
 #include <chrono>
 #include <sstream>
@@ -36,7 +35,6 @@
 #include <SDL.h>
 #include <SDL_opengl.h>
 #endif
-
 
 /////////////////////////////////////////////////////////////////////////////////////
 // GUI helper functions
@@ -279,7 +277,7 @@ void errorMarker(const char* desc) {
 
 int main(int argc, char* argv[]) {
     PragueSkyModel                   originalSkyModel;
-    Realtime::RealtimePragueSkyModel realtimeSkyModel;
+    RealtimeSkyModel                 realtimeSkyModel;
     std::vector<std::vector<float>> originalResult;
     std::vector<std::vector<float>> realtimeResult;
     void*                           textureOriginal  = NULL;
@@ -295,7 +293,7 @@ int main(int argc, char* argv[]) {
                                          "only visibilities 90.0 - 131.8 km" };
 
     // Default ranges
-    PragueSkyModel::AvailableData available;
+    AvailableData available;
     available.albedoMin     = 0.0;
     available.albedoMax     = 1.0;
     available.altitudeMin   = 0.0;
@@ -696,7 +694,7 @@ int main(int argc, char* argv[]) {
                     // Render and measure how long it takes to compute original model
                     {
                         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-                        render<PragueSkyModel>(originalSkyModel,
+                        originalModelRender(originalSkyModel,
                             albedo,
                             altitude,
                             azimuth,
@@ -713,7 +711,7 @@ int main(int argc, char* argv[]) {
                     // Render and measure how long it takes to compute realtime model
                     {
                         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-                        render<Realtime::RealtimePragueSkyModel>(realtimeSkyModel,
+                        realtimeModelRender(realtimeSkyModel,
                             albedo,
                             altitude,
                             azimuth,
