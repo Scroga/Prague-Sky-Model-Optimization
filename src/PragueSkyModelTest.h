@@ -10,8 +10,8 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
-#include "original/PragueSkyModel.h"
-#include "realtime/RealtimeSkyModel.h"
+#include "PragueSkyModel.h"
+#include "RealtimeSkyModel.h"
 
 /////////////////////////////////////////////////////////////////////////////////////
 // Rendering
@@ -149,7 +149,7 @@ void originalModelRender(const PragueSkyModel& model,
 /// <param name="view">Rendered view: up-facing fisheye or side-facing fisheye.</param>
 /// <param name="visibility">Horizontal visibility (meteorological range) at ground level in kilometers, value in range [20, 131.8].</param>
 /// <param name="outResult">Buffer for storing the resulting images (index 0 = sRGB, index 1 - <# of channels in the dataset> = individual channels).</param>
-void realtimeModelRender(const RealtimeSkyModel& model,
+void optimizedModelRender(RealtimeSkyModel& model,
 				const double                     albedo,
 				const double                     altitude,
 				const double                     azimuth,
@@ -209,37 +209,49 @@ void realtimeModelRender(const RealtimeSkyModel& model,
 																				continue;
 																}
 
-																// Get internal model parameters for the desired configuration.
-																const Parameters params = model.computeParameters(viewPoint,
-																				viewDir,
-																				elevation,
-																				azimuth,
-																				visibility,
-																				albedo);
-
-																// Based on the selected mode compute spectral sky radiance, sun radiance,
-																// polarisation or transmittance.
 																Spectrum spectrum;
-																for (int wl = 0; wl < SPECTRUM_CHANNELS; wl++) {
-																				switch (mode) {
-																				case Mode::SunRadiance:
-																								spectrum[wl] = model.sunRadiance(params, SPECTRUM_WAVELENGTHS[wl]);
-																								break;
-																				case Mode::Polarisation:
-																								spectrum[wl] =
-																												std::abs(model.polarisation(params, SPECTRUM_WAVELENGTHS[wl]));
-																								break;
-																				case Mode::Transmittance:
-																								spectrum[wl] = model.transmittance(params,
-																												SPECTRUM_WAVELENGTHS[wl],
-																												std::numeric_limits<double>::max());
-																								break;
-																				default: // Mode::SkyRadiance
-																								spectrum[wl] = model.skyRadiance(params, SPECTRUM_WAVELENGTHS[wl]);
-																								break;
+																if (mode == Mode::SkyRadiance) {
+																				//////////////////////////////////////
+																				// THIS METHOD IS NOT THREAD SAFE !!!!!!!!!!!!!!!!!!!!!!
+																				//////////////////////////////////////
+																				model.setParameters(
+																								viewPoint,
+																								viewDir,
+																								elevation,
+																								azimuth,
+																								visibility,
+																								albedo);
+																				for (int wl = 0; wl < SPECTRUM_CHANNELS; wl++)
+																								spectrum[wl] = model.skyRadiance(SPECTRUM_WAVELENGTHS[wl]);
+																}
+																else {
+																				// Get internal model parameters for the desired configuration.
+																				const Parameters params = model.computeParameters(viewPoint,
+																								viewDir,
+																								elevation,
+																								azimuth,
+																								visibility,
+																								albedo);
+
+																				// Based on the selected mode compute spectral sky radiance, sun radiance,
+																				// polarisation or transmittance.
+																				for (int wl = 0; wl < SPECTRUM_CHANNELS; wl++) {
+																								switch (mode) {
+																								case Mode::SunRadiance:
+																												spectrum[wl] = model.sunRadiance(params, SPECTRUM_WAVELENGTHS[wl]);
+																												break;
+																								case Mode::Polarisation:
+																												spectrum[wl] =
+																																std::abs(model.polarisation(params, SPECTRUM_WAVELENGTHS[wl]));
+																												break;
+																								case Mode::Transmittance:
+																												spectrum[wl] = model.transmittance(params,
+																																SPECTRUM_WAVELENGTHS[wl],
+																																std::numeric_limits<double>::max());
+																												break;
+																								}
 																				}
 																}
-
 																// Convert the spectral quantity to sRGB and store it at 0 in the result buffer.
 																const Vector3 rgb = spectrumToRGB(spectrum);
 																outResult[0][(size_t(x) * resolution + y) * 3] = float(rgb.x);

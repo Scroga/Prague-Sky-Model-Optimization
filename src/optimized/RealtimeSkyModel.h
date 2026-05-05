@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <cmath>
+#include <optional>
 
 #include "../PragueSkyModelCommon.h"
 
@@ -41,6 +42,39 @@
 /// passing viewing point and direction to the computeParameters method.
 class RealtimeSkyModel {
 private:
+				/////////////////////////////////////////////////////////////////////////////////////
+				// Private types
+				/////////////////////////////////////////////////////////////////////////////////////
+				struct RawParameters {
+								Vector3 viewpoint;
+								Vector3 viewDirection;
+								double groundLevelSolarElevationAtOrigin;
+								double groundLevelSolarAzimuthAtOrigin;
+								double visibility;
+								double albedo;
+				};
+
+				struct IntermediateParameters {
+								Vector3 toViewpointN;
+								Vector3 shiftedViewpoint;
+								Vector3 viewDirectionN;
+								Vector3 directionToSunN;
+								Vector3 shadowDirectionN;
+								Vector3 correctViewN;
+								double distanceToView;
+				};
+
+				struct IntermediateInterpolationParameter {
+								AngleParameters angleParameters;
+
+								InterpolationParameter visibilityParam;
+								InterpolationParameter albedoParam;
+								InterpolationParameter altitudeParam;
+								InterpolationParameter elevationParam;
+
+								bool initialized = false;
+				};
+
 				/////////////////////////////////////////////////////////////////////////////////////
 				// Private data
 				/////////////////////////////////////////////////////////////////////////////////////
@@ -107,6 +141,15 @@ private:
 				std::vector<float> dataTransU;
 				std::vector<float> dataTransV;
 
+				// Cached parameters
+				std::optional<RawParameters> prevRawParams;
+
+				IntermediateParameters interParams;
+				mutable IntermediateInterpolationParameter interInterpolationParams;
+
+				mutable std::optional<Parameters> prevParams;
+				std::optional<Parameters> currentParams;
+
 				/////////////////////////////////////////////////////////////////////////////////////
 				// Public methods
 				/////////////////////////////////////////////////////////////////////////////////////
@@ -147,11 +190,20 @@ public:
 								const double   visibility,
 								const double   albedo) const;
 
+				void setParameters(const Vector3& viewPoint,
+								const Vector3& viewDirection,
+								const double   groundLevelSolarElevationAtOrigin,
+								const double   groundLevelSolarAzimuthAtOrigin,
+								const double   visibility,
+								const double   albedo);
+
 				/// Computes sky radiance only (without direct sun contribution) for given parameters and wavelength (full
 								/// dataset supports wavelengths from 280 nm to 2480 nm).
 								///
 								/// Throws NotInitializedException if called without initializing the model first.
 				double skyRadiance(const Parameters& params, const double wavelength) const;
+
+				double skyRadiance(const double wavelength) const;
 
 				/// Computes sun radiance only (without radiance inscattered from the sky) for given parameters and
 				/// wavelength (full dataset supports wavelengths from 280 nm to 2480 nm).

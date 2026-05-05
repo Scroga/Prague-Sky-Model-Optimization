@@ -318,6 +318,14 @@ public:
         return Vector3(x / factor, y / factor, z / factor);
     }
 
+    constexpr bool operator==(const Vector3& other) const {
+        return x == other.x && y == other.y && z == other.z;
+    }
+
+    constexpr bool operator!=(const Vector3& other) const {
+        return !(*this == other);
+    }
+
     constexpr bool isZero() const {
         return x == 0.0 && y == 0.0 && z == 0.0;
     }

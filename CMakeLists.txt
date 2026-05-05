@@ -23,14 +23,14 @@ if(WIN32)
 set(PRAGUESKYMODEL_SRC
     thirdparty/miniz/miniz.c
     src/original/PragueSkyModel.cpp
-    src/realtime/RealtimeSkyModel.cpp
+    src/optimized/RealtimeSkyModel.cpp
     src/PragueSkyModelTestCli.cpp
 )
 
 add_executable(PragueSkyModelCli ${PRAGUESKYMODEL_SRC})
 
 target_include_directories(PragueSkyModelCli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/original)
-target_include_directories(PragueSkyModelCli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/realtime)
+target_include_directories(PragueSkyModelCli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/optimized)
 target_include_directories(PragueSkyModelCli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty)
 target_include_directories(PragueSkyModelCli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/miniz)
 target_include_directories(PragueSkyModelCli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/tinyexr)
@@ -48,14 +48,14 @@ set(PRAGUESKYMODELGUI_SRC
     thirdparty/imgui/backends/imgui_impl_dx11.cpp
     thirdparty/imgui/backends/imgui_impl_win32.cpp
     src/original/PragueSkyModel.cpp
-    src/realtime/RealtimeSkyModel.cpp
+    src/optimized/RealtimeSkyModel.cpp
     src/PragueSkyModelTestGui.cpp
 )
 
 add_executable(PragueSkyModelGui ${PRAGUESKYMODELGUI_SRC})
 
 target_include_directories(PragueSkyModelGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/original)
-target_include_directories(PragueSkyModelGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/realtime)
+target_include_directories(PragueSkyModelGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/optimized)
 target_include_directories(PragueSkyModelGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty)
 target_include_directories(PragueSkyModelGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/miniz)
 target_include_directories(PragueSkyModelGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/imgui)
@@ -76,14 +76,14 @@ find_package(TBB REQUIRED)
 set(PRAGUESKYMODEL_SRC
     thirdparty/miniz/miniz.c
     src/original/PragueSkyModel.cpp
-    src/realtime/RealtimeSkyModel.cpp
+    src/optimized/RealtimeSkyModel.cpp
     src/PragueSkyModelTestCli.cpp
 )
 
 add_executable(PragueSkyModelCli ${PRAGUESKYMODEL_SRC})
 
 target_include_directories(PragueSkyModelCli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/original)
-target_include_directories(PragueSkyModelCli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/realtime)
+target_include_directories(PragueSkyModelCli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/optimized)
 target_include_directories(PragueSkyModelCli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty)
 target_include_directories(PragueSkyModelCli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/miniz)
 target_include_directories(PragueSkyModelCli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/tinyexr)
@@ -106,14 +106,14 @@ set(PRAGUESKYMODELGUI_SRC
     thirdparty/imgui/backends/imgui_impl_sdl.cpp
     thirdparty/imgui/backends/imgui_impl_opengl2.cpp
     src/original/PragueSkyModel.cpp
-    src/realtime/RealtimeSkyModel.cpp
+    src/optimized/RealtimeSkyModel.cpp
     src/PragueSkyModelTestGui.cpp
 )
 
 add_executable(PragueSkyModelGui ${PRAGUESKYMODELGUI_SRC})
 
 target_include_directories(PragueSkyModelGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/original)
-target_include_directories(PragueSkyModelGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/realtime)
+target_include_directories(PragueSkyModelGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/optimized)
 target_include_directories(PragueSkyModelGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty)
 target_include_directories(PragueSkyModelGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/miniz)
 target_include_directories(PragueSkyModelGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/imgui)

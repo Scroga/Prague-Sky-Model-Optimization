@@ -711,7 +711,7 @@ int main(int argc, char* argv[]) {
                     // Render and measure how long it takes to compute realtime model
                     {
                         std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-                        realtimeModelRender(realtimeSkyModel,
+                        optimizedModelRender(realtimeSkyModel,
                             albedo,
                             altitude,
                             azimuth,
