@@ -186,16 +186,9 @@ public:
 				/// supports altitude from [0, 15000] m, elevation from [-0.073, PI/2] rad, azimuth from [0, PI] rad, visibility
 				/// from [20, 131.8] km, and albedo from [0, 1]. Values outside range of the used dataset are clamped to the
 				/// nearest supported value.
-				Parameters computeParameters(
-								const Vector3& viewPoint,
-								const Vector3& viewDirection,
-								const double   groundLevelSolarElevationAtOrigin,
-								const double   groundLevelSolarAzimuthAtOrigin,
-								const double   visibility,
-								const double   albedo) const;
 
 				PixelInterpolationParameters computePixelInterpolationParameters(
-								const Vector3& viewDirection) const;
+								const Vector3& viewDirection, Mode mode) const;
 
 				FrameInterpolationParameters computeFrameInterpolationParameters(
 								const Vector3& viewpoint,
@@ -221,7 +214,9 @@ public:
 				/// Checks whether the parameters correspond to view direction hitting the sun and returns 0 if not.
 				///
 				/// Throws NotInitializedException if called without initializing the model first.
-				double sunRadiance(const Parameters& params, const double wavelength) const;
+				double sunRadiance(
+								const PixelInterpolationParameters& pixelIterParams,
+								const double wavelength) const;
 
 				/// Computes degree of polarisation for given parameters and wavelength (full
 				/// dataset supports wavelengths from 280 nm to 2480 nm). Can be negative.
@@ -230,7 +225,10 @@ public:
 				/// - NoPolarisationException: if the polarisation method is called but the model does not contain
 				/// polarisation data
 				/// - NotInitializedException: if called without initializing the model first
-				double polarisation(const Parameters& params, const double wavelength) const;
+				double polarisation(
+								const PixelInterpolationParameters& pixelIterParams,
+								const FrameInterpolationParameters& frameIterParams,
+								const double wavelength) const;
 
 				/// Computes transmittance between view point and a point certain distance away from it along view
 				/// direction.
@@ -240,7 +238,10 @@ public:
 				/// infinity).
 				///
 				/// Throws NotInitializedException if called without initializing the model first.
-				double transmittance(const Parameters& params, const double wavelength, const double distance) const;
+				double transmittance(
+								const PixelInterpolationParameters& pixelIterParams,
+								const double wavelength,
+								const double distance) const;
 
 
 				/////////////////////////////////////////////////////////////////////////////////////
@@ -326,8 +327,9 @@ private:
 
 				/// Evaluates the model. Used for computing sky radiance and polarisation.
 				double evaluateModel(
-								const Parameters& params,
-								const double              wavelength,
+								const PixelInterpolationParameters& pixelIterParams,
+								const FrameInterpolationParameters& frameIterParams,
+								const double wavelength,
 								const std::vector<float>& data,
 								const Metadata& metadata) const;
 

@@ -433,103 +433,6 @@ AvailableData RealtimeSkyModel::getAvailableData() const {
 // Filling the Parameters structure
 /////////////////////////////////////////////////////////////////////////////////////
 
-Parameters RealtimeSkyModel::computeParameters(
-				const Vector3& viewpoint,
-				const Vector3& viewDirection,
-				const double   groundLevelSolarElevationAtOrigin,
-				const double   groundLevelSolarAzimuthAtOrigin,
-				const double   visibility,
-				const double   albedo) const {
-
-				assert(viewpoint.z >= 0.0);
-				assert(magnitude(viewDirection) > 0.0);
-				assert(visibility >= 0.0);
-				assert(albedo >= 0.0 && albedo <= 1.0);
-
-				Parameters params;
-				params.visibility = visibility;
-				params.albedo = albedo;
-
-				// Shift viewpoint about safety altitude up
-
-				const Vector3 centerOfTheEarth = Vector3(0.0, 0.0, -PLANET_RADIUS);
-				Vector3       toViewpoint = viewpoint - centerOfTheEarth;
-				Vector3       toViewpointN = normalize(toViewpoint);
-				const double  distanceToView = magnitude(toViewpoint) + SAFETY_ALTITUDE;
-				Vector3       toShiftedViewpoint = toViewpointN * distanceToView;
-				Vector3       shiftedViewpoint = centerOfTheEarth + toShiftedViewpoint;
-
-				Vector3 viewDirectionN = normalize(viewDirection);
-
-				// Compute altitude of viewpoint
-
-				params.altitude = distanceToView - PLANET_RADIUS;
-				params.altitude = std::max(params.altitude, 0.0);
-
-				// Direction to sun
-
-				Vector3 directionToSunN;
-				directionToSunN.x = cos(groundLevelSolarAzimuthAtOrigin) * cos(groundLevelSolarElevationAtOrigin);
-				directionToSunN.y = sin(groundLevelSolarAzimuthAtOrigin) * cos(groundLevelSolarElevationAtOrigin);
-				directionToSunN.z = sin(groundLevelSolarElevationAtOrigin);
-
-				// Solar elevation at viewpoint (more precisely, solar elevation at the point
-				// on the ground directly below viewpoint)
-
-				const double dotZenithSun = dot(toViewpointN, directionToSunN);
-				params.elevation = 0.5 * PI - acos(dotZenithSun);
-
-				// Altitude-corrected view direction
-
-				Vector3 correctViewN;
-				if (distanceToView > PLANET_RADIUS) {
-								Vector3 lookAt = shiftedViewpoint + viewDirectionN;
-
-								const double correction =
-												sqrt(distanceToView * distanceToView - PLANET_RADIUS * PLANET_RADIUS) / distanceToView;
-
-								Vector3 toNewOrigin = toViewpointN * (distanceToView - correction);
-								Vector3 newOrigin = centerOfTheEarth + toNewOrigin;
-								Vector3 correctView = lookAt - newOrigin;
-
-								correctViewN = normalize(correctView);
-				}
-				else {
-								correctViewN = viewDirectionN;
-				}
-
-				// Sun angle (gamma) - no correction
-
-				double dotProductSun = dot(viewDirectionN, directionToSunN);
-				params.gamma = acos(dotProductSun);
-
-				// Shadow angle - requires correction
-
-				const double effectiveElevation = groundLevelSolarElevationAtOrigin;
-				const double effectiveAzimuth = groundLevelSolarAzimuthAtOrigin;
-				const double shadowAngle = effectiveElevation + PI * 0.5;
-
-				Vector3 shadowDirectionN = Vector3(cos(shadowAngle) * cos(effectiveAzimuth),
-								cos(shadowAngle) * sin(effectiveAzimuth),
-								sin(shadowAngle));
-
-				const double dotProductShadow = dot(correctViewN, shadowDirectionN);
-				params.shadow = acos(dotProductShadow);
-
-				// Zenith angle (theta) - corrected version stored in otherwise unused zero
-				// angle
-
-				double cosThetaCor = dot(correctViewN, toViewpointN);
-				params.zero = acos(cosThetaCor);
-
-				// Zenith angle (theta) - uncorrected version goes outside
-
-				double cosTheta = dot(viewDirectionN, toViewpointN);
-				params.theta = acos(cosTheta);
-
-				return params;
-}
-
 RealtimeSkyModel::FrameInterpolationParameters RealtimeSkyModel::computeFrameInterpolationParameters(
 				const Vector3& viewpoint,
 				const double   groundLevelSolarElevationAtOrigin,
@@ -591,8 +494,10 @@ RealtimeSkyModel::FrameInterpolationParameters RealtimeSkyModel::computeFrameInt
 }
 
 RealtimeSkyModel::PixelInterpolationParameters RealtimeSkyModel::computePixelInterpolationParameters(
-				const Vector3& viewDirection) const {
-			
+				const Vector3& viewDirection, Mode mode) const {
+				
+				const Metadata& metadata = (mode == Mode::Polarisation) ? metadataPol : metadataRad;
+
 				if (!initializedFrameParams) {
 								throw NotInitializedException();
 				}
@@ -639,15 +544,15 @@ RealtimeSkyModel::PixelInterpolationParameters RealtimeSkyModel::computePixelInt
 
 				// Translate angle values to indices and interpolation factors.
 				iterParams.angle = AngleParameters{};
-				iterParams.angle.gamma = getInterpolationParameter(iterParams.gamma, metadataRad.sunBreaks);
-				if (!metadataRad.emphBreaks.empty()) { // for radiance
+				iterParams.angle.gamma = getInterpolationParameter(iterParams.gamma, metadata.sunBreaks);
+				if (!metadata.emphBreaks.empty()) { // for radiance
 								iterParams.angle.alpha =
 												getInterpolationParameter(frameParams.elevation < 0.0 ? iterParams.shadow : iterParams.zero,
-																metadataRad.zenithBreaks);
-								iterParams.angle.zero = getInterpolationParameter(iterParams.zero, metadataRad.emphBreaks);
+																metadata.zenithBreaks);
+								iterParams.angle.zero = getInterpolationParameter(iterParams.zero, metadata.emphBreaks);
 				}
 				else { // for polarisation
-								iterParams.angle.alpha = getInterpolationParameter(iterParams.zero, metadataRad.zenithBreaks);
+								iterParams.angle.alpha = getInterpolationParameter(iterParams.zero, metadata.zenithBreaks);
 				}
 
 				return iterParams;
@@ -732,83 +637,12 @@ double RealtimeSkyModel::reconstruct(
 				return result;
 }
 
-double RealtimeSkyModel::evaluateModel(const Parameters& params,
-				const double              wavelength,
-				const std::vector<float>& data,
-				const Metadata& metadata) const {
-				// Ignore wavelengths outside the dataset range.
-				if (wavelength < channelStart || wavelength >= (channelStart + channels * channelWidth)) {
-								return 0.0;
-				}
-
-				// Don't interpolate wavelengths inside the dataset range.
-				const int channelIndex = int(floor((wavelength - channelStart) / channelWidth));
-
-				// Translate angle values to indices and interpolation factors.
-				AngleParameters angleParameters;
-				angleParameters.gamma = getInterpolationParameter(params.gamma, metadata.sunBreaks);
-				if (!metadata.emphBreaks.empty()) { // for radiance
-								angleParameters.alpha =
-												getInterpolationParameter(params.elevation < 0.0 ? params.shadow : params.zero,
-																metadata.zenithBreaks);
-								angleParameters.zero = getInterpolationParameter(params.zero, metadata.emphBreaks);
-				}
-				else { // for polarisation
-								angleParameters.alpha = getInterpolationParameter(params.zero, metadata.zenithBreaks);
-				}
-
-				// Translate configuration values to indices and interpolation factors.
-				const InterpolationParameter visibilityParam =
-								getInterpolationParameter(params.visibility, visibilitiesRad);
-				const InterpolationParameter albedoParam = getInterpolationParameter(params.albedo, albedosRad);
-				const InterpolationParameter altitudeParam = getInterpolationParameter(params.altitude, altitudesRad);
-				const InterpolationParameter elevationParam =
-								getInterpolationParameter(radiansToDegrees(params.elevation), elevationsRad);
-
-				// Prepare parameters controlling the interpolation.
-				ControlParameters controlParameters;
-				for (int i = 0; i < 16; ++i) {
-								const int visibilityIndex = std::min(visibilityParam.index + i / 8, int(visibilitiesRad.size() - 1));
-								const int albedoIndex = std::min(albedoParam.index + (i % 8) / 4, int(albedosRad.size() - 1));
-								const int altitudeIndex = std::min(altitudeParam.index + (i % 4) / 2, int(altitudesRad.size() - 1));
-								const int elevationIndex = std::min(elevationParam.index + i % 2, int(elevationsRad.size() - 1));
-
-								controlParameters.coefficients[i] = getCoefficients(data,
-												metadata.totalCoefsSingleConfig,
-												elevationIndex,
-												altitudeIndex,
-												visibilityIndex,
-												albedoIndex,
-												channelIndex);
-				}
-				controlParameters.interpolationFactor[0] = visibilityParam.factor;
-				controlParameters.interpolationFactor[1] = albedoParam.factor;
-				controlParameters.interpolationFactor[2] = altitudeParam.factor;
-				controlParameters.interpolationFactor[3] = elevationParam.factor;
-
-				// Interpolate.
-				const double result = interpolate<0, 0>(angleParameters, controlParameters, metadata);
-				assert(metadata.emphBreaks.empty() || result >= 0.0); // polarisation can be negative
-
-				return result;
-}
-
-/////////////////////////////////////////////////////////////////////////////////////
-// Sky radiance
-/////////////////////////////////////////////////////////////////////////////////////
-
-double RealtimeSkyModel::skyRadiance(const Parameters& params, const double wavelength) const {
-				if (!initialized) {
-								throw NotInitializedException();
-				}
-
-				return evaluateModel(params, wavelength, dataRad, metadataRad);
-}
-
-double RealtimeSkyModel::skyRadiance(
+double RealtimeSkyModel::evaluateModel(
 				const PixelInterpolationParameters& pixelIterParams,
 				const FrameInterpolationParameters& frameIterParams,
-				const double wavelength) const {
+				const double wavelength,
+				const std::vector<float>& data,
+				const Metadata& metadata) const {
 
 				if (!initialized) {
 								throw NotInitializedException();
@@ -826,6 +660,10 @@ double RealtimeSkyModel::skyRadiance(
 				const int channelIndex = int(floor((wavelength - channelStart) / channelWidth));
 
 				// Prepare parameters controlling the interpolation.
+
+				////////////////////////////////////////////////////////////////
+				// This can be precomputed with frameIterParams
+				////////////////////////////////////////////////////////////////
 				ControlParameters controlParameters;
 				for (int i = 0; i < 16; ++i) {
 								const int visibilityIndex = std::min(frameIterParams.visibility.index + i / 8, int(visibilitiesRad.size() - 1));
@@ -833,8 +671,8 @@ double RealtimeSkyModel::skyRadiance(
 								const int altitudeIndex = std::min(frameIterParams.altitude.index + (i % 4) / 2, int(altitudesRad.size() - 1));
 								const int elevationIndex = std::min(frameIterParams.elevation.index + i % 2, int(elevationsRad.size() - 1));
 
-								controlParameters.coefficients[i] = getCoefficients(dataRad,
-												metadataRad.totalCoefsSingleConfig,
+								controlParameters.coefficients[i] = getCoefficients(data,
+												metadata.totalCoefsSingleConfig,
 												elevationIndex,
 												altitudeIndex,
 												visibilityIndex,
@@ -845,20 +683,39 @@ double RealtimeSkyModel::skyRadiance(
 				controlParameters.interpolationFactor[1] = frameIterParams.albedo.factor;
 				controlParameters.interpolationFactor[2] = frameIterParams.altitude.factor;
 				controlParameters.interpolationFactor[3] = frameIterParams.elevation.factor;
+				////////////////////////////////////////////////////////////////
 
 				// Interpolate.
-				const double result = interpolate<0, 0>(pixelIterParams.angle, controlParameters, metadataRad);
+				const double result = interpolate<0, 0>(pixelIterParams.angle, controlParameters, metadata);
 				assert(metadata.emphBreaks.empty() || result >= 0.0); // polarisation can be negative
 
 				return result;
 }
 
+/////////////////////////////////////////////////////////////////////////////////////
+// Sky radiance
+/////////////////////////////////////////////////////////////////////////////////////
+
+double RealtimeSkyModel::skyRadiance(
+				const PixelInterpolationParameters& pixelIterParams,
+				const FrameInterpolationParameters& frameIterParams, 
+				const double wavelength) const {
+
+				if (!initialized) {
+								throw NotInitializedException();
+				}
+
+				return evaluateModel(pixelIterParams, frameIterParams, wavelength, dataRad, metadataRad);
+}
 
 /////////////////////////////////////////////////////////////////////////////////////
 // Sun radiance
 /////////////////////////////////////////////////////////////////////////////////////
 
-double RealtimeSkyModel::sunRadiance(const Parameters& params, const double wavelength) const {
+double RealtimeSkyModel::sunRadiance(
+				const PixelInterpolationParameters& pixelIterParams,
+				const double wavelength) const {
+
 				if (!initialized) {
 								throw NotInitializedException();
 				}
@@ -869,7 +726,7 @@ double RealtimeSkyModel::sunRadiance(const Parameters& params, const double wave
 				}
 
 				// Return zero for rays not hitting the sun.
-				if (params.gamma > SUN_RADIUS) {
+				if (pixelIterParams.gamma > SUN_RADIUS) {
 								return 0.0;
 				}
 
@@ -885,7 +742,7 @@ double RealtimeSkyModel::sunRadiance(const Parameters& params, const double wave
 				assert(sunRadiance > 0.0);
 
 				// Compute transmittance towards the sun.
-				const double tau = RealtimeSkyModel::transmittance(params, wavelength, std::numeric_limits<double>::max());
+				const double tau = RealtimeSkyModel::transmittance(pixelIterParams, wavelength, std::numeric_limits<double>::max());
 				assert(tau >= 0.0 && tau <= 1.0);
 
 				// Combine.
@@ -897,7 +754,11 @@ double RealtimeSkyModel::sunRadiance(const Parameters& params, const double wave
 // Polarisation
 /////////////////////////////////////////////////////////////////////////////////////
 
-double RealtimeSkyModel::polarisation(const Parameters& params, const double wavelength) const {
+double RealtimeSkyModel::polarisation(
+				const PixelInterpolationParameters& pixelIterParams,
+				const FrameInterpolationParameters& frameIterParams,
+				const double wavelength) const {
+
 				if (!initialized) {
 								throw NotInitializedException();
 				}
@@ -907,7 +768,7 @@ double RealtimeSkyModel::polarisation(const Parameters& params, const double wav
 								throw NoPolarisationException();
 				}
 
-				return -evaluateModel(params, wavelength, dataPol, metadataPol);
+				return -evaluateModel(pixelIterParams, frameIterParams, wavelength, dataPol, metadataPol);
 }
 
 
@@ -1054,9 +915,10 @@ double RealtimeSkyModel::interpolateTrans(const int                     visibili
 				return trans;
 }
 
-double RealtimeSkyModel::transmittance(const Parameters& params,
-				const double      wavelength,
-				const double      distance) const {
+double RealtimeSkyModel::transmittance(
+				const PixelInterpolationParameters& pixelIterParams,
+				const double wavelength,
+				const double distance) const {
 				assert(distance > 0.0);
 
 				if (!initialized) {
@@ -1071,12 +933,11 @@ double RealtimeSkyModel::transmittance(const Parameters& params,
 				const int channelIndex = int(floor((wavelength - channelStart) / channelWidth));
 
 				// Translate configuration values to indices and interpolation factors.
-				const InterpolationParameter visibilityParam =
-								getInterpolationParameter(params.visibility, visibilitiesTrans);
-				const InterpolationParameter altitudeParam = getInterpolationParameter(params.altitude, altitudesTrans);
+				const InterpolationParameter visibilityParam = getInterpolationParameter(frameParams.visibility, visibilitiesTrans);
+				const InterpolationParameter altitudeParam = getInterpolationParameter(frameParams.altitude, altitudesTrans);
 
 				// Calculate position in the atmosphere.
-				const TransmittanceParameters transParams = toTransmittanceParams(params.theta, distance, params.altitude);
+				const TransmittanceParameters transParams = toTransmittanceParams(pixelIterParams.theta, distance, frameParams.altitude);
 
 				// Get transmittance for the nearest lower visibility.
 				double trans = interpolateTrans(visibilityParam.index, altitudeParam, transParams, channelIndex);
