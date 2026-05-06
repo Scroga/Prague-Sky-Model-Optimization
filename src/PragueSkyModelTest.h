@@ -178,6 +178,13 @@ void optimizedModelRender(RealtimeSkyModel& model,
 								}
 				}
 
+				RealtimeSkyModel::FrameInterpolationParameters frameIterParams = model.computeFrameInterpolationParameters(
+								viewPoint,
+								elevation,
+								azimuth,
+								visibility,
+								albedo);
+
 				std::vector<int> xs;
 				xs.resize(resolution);
 				for (int x = 0; x < resolution; x++) {
@@ -188,6 +195,7 @@ void optimizedModelRender(RealtimeSkyModel& model,
 								xs.begin(),
 								xs.end(),
 								[&model,
+								&frameIterParams,
 								albedo,
 								altitude,
 								azimuth,
@@ -211,18 +219,9 @@ void optimizedModelRender(RealtimeSkyModel& model,
 
 																Spectrum spectrum;
 																if (mode == Mode::SkyRadiance) {
-																				//////////////////////////////////////
-																				// THIS METHOD IS NOT THREAD SAFE !!!!!!!!!!!!!!!!!!!!!!
-																				//////////////////////////////////////
-																				model.setParameters(
-																								viewPoint,
-																								viewDir,
-																								elevation,
-																								azimuth,
-																								visibility,
-																								albedo);
+																				RealtimeSkyModel::PixelInterpolationParameters pixelIterParams = model.computePixelInterpolationParameters(viewDir);
 																				for (int wl = 0; wl < SPECTRUM_CHANNELS; wl++)
-																								spectrum[wl] = model.skyRadiance(SPECTRUM_WAVELENGTHS[wl]);
+																								spectrum[wl] = model.skyRadiance(pixelIterParams, frameIterParams, SPECTRUM_WAVELENGTHS[wl]);
 																}
 																else {
 																				// Get internal model parameters for the desired configuration.

@@ -530,139 +530,127 @@ Parameters RealtimeSkyModel::computeParameters(
 				return params;
 }
 
-
-void RealtimeSkyModel::setParameters(
+RealtimeSkyModel::FrameInterpolationParameters RealtimeSkyModel::computeFrameInterpolationParameters(
 				const Vector3& viewpoint,
-				const Vector3& viewDirection,
 				const double   groundLevelSolarElevationAtOrigin,
 				const double   groundLevelSolarAzimuthAtOrigin,
 				const double   visibility,
 				const double   albedo) {
 
 				assert(viewpoint.z >= 0.0);
-				assert(magnitude(viewDirection) > 0.0);
 				assert(visibility >= 0.0);
 				assert(albedo >= 0.0 && albedo <= 1.0);
 
-				const bool firstCall = !prevRawParams.has_value();
+				// Compute frame parameters
+				if (initializedFrameParams == false) 
+								frameParams = FrameParameters{};
 
-				const bool viewpointChanged = firstCall || prevRawParams->viewpoint != viewpoint;
-				const bool viewDirectionChanged = firstCall || prevRawParams->viewDirection != viewDirection;
-				const bool solarPositionChanged = firstCall ||
-								prevRawParams->groundLevelSolarElevationAtOrigin != groundLevelSolarElevationAtOrigin ||
-								prevRawParams->groundLevelSolarAzimuthAtOrigin != groundLevelSolarAzimuthAtOrigin;
-
-				prevParams = currentParams;
-
-				if (!currentParams.has_value()) {
-								currentParams = Parameters{};
-				}
-
-				currentParams->visibility = visibility;
-				currentParams->albedo = albedo;
+				frameParams.visibility = visibility;
+				frameParams.albedo = albedo;
 
 				const Vector3 centerOfTheEarth = Vector3(0.0, 0.0, -PLANET_RADIUS);
+				Vector3       toViewpoint = viewpoint - centerOfTheEarth;
+				Vector3       toViewpointN = normalize(toViewpoint);
+				const double  distanceToView = magnitude(toViewpoint) + SAFETY_ALTITUDE;
+				Vector3       toShiftedViewpoint = toViewpointN * distanceToView;
+				Vector3       shiftedViewpoint = centerOfTheEarth + toShiftedViewpoint;
 
-				if (viewpointChanged) {
-								Vector3 toViewpoint = viewpoint - centerOfTheEarth;
+				frameParams.shiftedViewpoint = shiftedViewpoint;
+				frameParams.distanceToView = distanceToView;
+				frameParams.toViewpointN = toViewpointN;
+				
+				frameParams.altitude = std::max(distanceToView - PLANET_RADIUS, 0.0);
 
-								interParams.toViewpointN = normalize(toViewpoint);
-								interParams.distanceToView = magnitude(toViewpoint) + SAFETY_ALTITUDE;
-								interParams.shiftedViewpoint = centerOfTheEarth + interParams.toViewpointN * interParams.distanceToView;
+				frameParams.directionToSunN.x = cos(groundLevelSolarAzimuthAtOrigin) * cos(groundLevelSolarElevationAtOrigin);
+				frameParams.directionToSunN.y = sin(groundLevelSolarAzimuthAtOrigin) * cos(groundLevelSolarElevationAtOrigin);
+				frameParams.directionToSunN.z = sin(groundLevelSolarElevationAtOrigin);
 
-								currentParams->altitude = std::max(interParams.distanceToView - PLANET_RADIUS, 0.0);
+				const double dotZenithSun = dot(toViewpointN, frameParams.directionToSunN);
+				frameParams.elevation = 0.5 * PI - acos(dotZenithSun);
+
+				const double effectiveElevation = groundLevelSolarElevationAtOrigin;
+				const double effectiveAzimuth = groundLevelSolarAzimuthAtOrigin;
+				const double shadowAngle = effectiveElevation + PI * 0.5;
+
+				Vector3 shadowDirectionN = Vector3(cos(shadowAngle) * cos(effectiveAzimuth),
+								cos(shadowAngle) * sin(effectiveAzimuth),
+								sin(shadowAngle));
+
+				frameParams.shadowDirectionN = shadowDirectionN;
+
+				initializedFrameParams = true;
+
+				// Compute frame interpolation parameters
+				FrameInterpolationParameters interParams{};
+				interParams.visibility = getInterpolationParameter(frameParams.visibility, visibilitiesRad);
+				interParams.albedo = getInterpolationParameter(frameParams.albedo, albedosRad);
+				interParams.altitude = getInterpolationParameter(frameParams.altitude, altitudesRad);
+				interParams.elevation = getInterpolationParameter(radiansToDegrees(frameParams.elevation), elevationsRad);
+
+				return interParams;
+}
+
+RealtimeSkyModel::PixelInterpolationParameters RealtimeSkyModel::computePixelInterpolationParameters(
+				const Vector3& viewDirection) const {
+			
+				if (!initializedFrameParams) {
+								throw NotInitializedException();
 				}
 
-				if (viewDirectionChanged) {
-								interParams.viewDirectionN = normalize(viewDirection);
+				const Vector3 centerOfTheEarth = Vector3(0.0, 0.0, -PLANET_RADIUS);
+				Vector3 viewDirectionN = normalize(viewDirection);
+
+				Vector3 correctViewN;
+				if (frameParams.distanceToView > PLANET_RADIUS) {
+								Vector3 lookAt = frameParams.shiftedViewpoint + viewDirectionN;
+
+								const double correction =
+												sqrt(frameParams.distanceToView * frameParams.distanceToView 
+																- PLANET_RADIUS * PLANET_RADIUS) / frameParams.distanceToView;
+
+								Vector3 toNewOrigin = frameParams.toViewpointN * (frameParams.distanceToView - correction);
+								Vector3 newOrigin = centerOfTheEarth + toNewOrigin;
+								Vector3 correctView = lookAt - newOrigin;
+
+								correctViewN = normalize(correctView);
+				}
+				else {
+								correctViewN = viewDirectionN;
 				}
 
-				if (solarPositionChanged) {
-								interParams.directionToSunN.x =
-												cos(groundLevelSolarAzimuthAtOrigin) *
-												cos(groundLevelSolarElevationAtOrigin);
-								interParams.directionToSunN.y =
-												sin(groundLevelSolarAzimuthAtOrigin) *
-												cos(groundLevelSolarElevationAtOrigin);
-								interParams.directionToSunN.z =
-												sin(groundLevelSolarElevationAtOrigin);
+				// Compute pixel interpolation parameters
+				PixelInterpolationParameters iterParams{};
 
-								const double shadowAngle = groundLevelSolarElevationAtOrigin + PI * 0.5;
+				// Sun angle (gamma) - no correction
+				double dotProductSun = dot(viewDirectionN, frameParams.directionToSunN);
+				iterParams.gamma = acos(dotProductSun);
 
-								interParams.shadowDirectionN = Vector3(
-												cos(shadowAngle) * cos(groundLevelSolarAzimuthAtOrigin),
-												cos(shadowAngle) * sin(groundLevelSolarAzimuthAtOrigin),
-												sin(shadowAngle));
+				// Zenith angle (theta) - uncorrected version goes outside
+				double cosTheta = dot(viewDirectionN, frameParams.toViewpointN);
+				iterParams.theta = acos(cosTheta);
+
+				// Shadow angle - requires correction
+				const double dotProductShadow = dot(correctViewN, frameParams.shadowDirectionN);
+				iterParams.shadow = acos(dotProductShadow);
+
+				// Zenith angle (theta) - corrected version stored in otherwise unused zero angle
+				double cosThetaCor = dot(correctViewN, frameParams.toViewpointN);
+				iterParams.zero = acos(cosThetaCor);
+
+				// Translate angle values to indices and interpolation factors.
+				iterParams.angle = AngleParameters{};
+				iterParams.angle.gamma = getInterpolationParameter(iterParams.gamma, metadataRad.sunBreaks);
+				if (!metadataRad.emphBreaks.empty()) { // for radiance
+								iterParams.angle.alpha =
+												getInterpolationParameter(frameParams.elevation < 0.0 ? iterParams.shadow : iterParams.zero,
+																metadataRad.zenithBreaks);
+								iterParams.angle.zero = getInterpolationParameter(iterParams.zero, metadataRad.emphBreaks);
+				}
+				else { // for polarisation
+								iterParams.angle.alpha = getInterpolationParameter(iterParams.zero, metadataRad.zenithBreaks);
 				}
 
-				// Depends on viewpoint and view direction.
-				if (viewpointChanged || viewDirectionChanged) {
-								if (interParams.distanceToView > PLANET_RADIUS) {
-												const Vector3 lookAt =
-																interParams.shiftedViewpoint + interParams.viewDirectionN;
-
-												const double correction =
-																sqrt(interParams.distanceToView * interParams.distanceToView -
-																				PLANET_RADIUS * PLANET_RADIUS) /
-																interParams.distanceToView;
-
-												const Vector3 toNewOrigin =
-																interParams.toViewpointN *
-																(interParams.distanceToView - correction);
-
-												const Vector3 newOrigin = centerOfTheEarth + toNewOrigin;
-												const Vector3 correctView = lookAt - newOrigin;
-
-												interParams.correctViewN = normalize(correctView);
-								}
-								else {
-												interParams.correctViewN = interParams.viewDirectionN;
-								}
-				}
-
-				if (viewpointChanged || solarPositionChanged) {
-								const double dotZenithSun =
-												dot(interParams.toViewpointN, interParams.directionToSunN);
-
-								currentParams->elevation = 0.5 * PI - acos(dotZenithSun);
-				}
-
-				if (viewDirectionChanged || solarPositionChanged) {
-								const double dotProductSun =
-												dot(interParams.viewDirectionN, interParams.directionToSunN);
-
-								currentParams->gamma = acos(dotProductSun);
-				}
-
-				if (viewpointChanged || viewDirectionChanged || solarPositionChanged) {
-								const double dotProductShadow =
-												dot(interParams.correctViewN, interParams.shadowDirectionN);
-
-								currentParams->shadow = acos(dotProductShadow);
-				}
-
-				if (viewpointChanged || viewDirectionChanged) {
-								const double cosThetaCor =
-												dot(interParams.correctViewN, interParams.toViewpointN);
-
-								currentParams->zero = acos(cosThetaCor);
-				}
-
-				if (viewpointChanged || viewDirectionChanged) {
-								const double cosTheta =
-												dot(interParams.viewDirectionN, interParams.toViewpointN);
-
-								currentParams->theta = acos(cosTheta);
-				}
-
-				prevRawParams = RawParameters{
-								.viewpoint = viewpoint,
-								.viewDirection = viewDirection,
-								.groundLevelSolarElevationAtOrigin = groundLevelSolarElevationAtOrigin,
-								.groundLevelSolarAzimuthAtOrigin = groundLevelSolarAzimuthAtOrigin,
-								.visibility = visibility,
-								.albedo = albedo
-				};
+				return iterParams;
 }
 
 /////////////////////////////////////////////////////////////////////////////////////
@@ -752,7 +740,6 @@ double RealtimeSkyModel::evaluateModel(const Parameters& params,
 				if (wavelength < channelStart || wavelength >= (channelStart + channels * channelWidth)) {
 								return 0.0;
 				}
-				assert(currentParameters.has_value());
 
 				// Don't interpolate wavelengths inside the dataset range.
 				const int channelIndex = int(floor((wavelength - channelStart) / channelWidth));
@@ -818,12 +805,15 @@ double RealtimeSkyModel::skyRadiance(const Parameters& params, const double wave
 				return evaluateModel(params, wavelength, dataRad, metadataRad);
 }
 
-double RealtimeSkyModel::skyRadiance(const double wavelength) const {
+double RealtimeSkyModel::skyRadiance(
+				const PixelInterpolationParameters& pixelIterParams,
+				const FrameInterpolationParameters& frameIterParams,
+				const double wavelength) const {
+
 				if (!initialized) {
 								throw NotInitializedException();
 				}
-
-				if (!currentParams.has_value()) {
+				if (!initializedFrameParams) {
 								throw NotInitializedException();
 				}
 
@@ -832,109 +822,33 @@ double RealtimeSkyModel::skyRadiance(const double wavelength) const {
 								return 0.0;
 				}
 
-				const Parameters& params = currentParams.value();
-
 				// Don't interpolate wavelengths inside the dataset range.
 				const int channelIndex = int(floor((wavelength - channelStart) / channelWidth));
 
-				const bool firstEvaluation =
-								!interInterpolationParams.initialized || !prevParams.has_value();
-
-				const bool gammaChanged = params.gamma != prevParams->gamma;
-				const bool elevationChanged = params.elevation != prevParams->elevation;
-				const bool shadowChanged = params.shadow != prevParams->shadow;
-				const bool zeroChanged = params.zero != prevParams->zero;
-				const bool visibilityChanged = params.visibility != prevParams->visibility;
-				const bool albedoChanged = params.albedo != prevParams->albedo;
-				const bool altitudeChanged = params.altitude != prevParams->altitude;
-
-				if (firstEvaluation || gammaChanged) {
-								interInterpolationParams.angleParameters.gamma =
-												getInterpolationParameter(params.gamma, metadataRad.sunBreaks);
-				}
-
-				if (firstEvaluation || elevationChanged || shadowChanged || zeroChanged) {
-								if (!metadataRad.emphBreaks.empty()) {
-												interInterpolationParams.angleParameters.alpha =
-																getInterpolationParameter(
-																				params.elevation < 0.0 ? params.shadow : params.zero,
-																				metadataRad.zenithBreaks
-																);
-
-												interInterpolationParams.angleParameters.zero =
-																getInterpolationParameter(params.zero, metadataRad.emphBreaks);
-								}
-								else {
-												interInterpolationParams.angleParameters.alpha =
-																getInterpolationParameter(params.zero, metadataRad.zenithBreaks);
-								}
-				}
-
-				if (firstEvaluation || elevationChanged) {
-								interInterpolationParams.elevationParam =
-												getInterpolationParameter(radiansToDegrees(params.elevation), elevationsRad);
-				}
-
-				if (firstEvaluation || visibilityChanged) {
-								interInterpolationParams.visibilityParam =
-												getInterpolationParameter(params.visibility, visibilitiesRad);
-				}
-
-				if (firstEvaluation || albedoChanged) {
-								interInterpolationParams.albedoParam =
-												getInterpolationParameter(params.albedo, albedosRad);
-				}
-
-				if (firstEvaluation || altitudeChanged) {
-								interInterpolationParams.altitudeParam =
-												getInterpolationParameter(params.altitude, altitudesRad);
-				}
-
-				interInterpolationParams.initialized = true;
-				prevParams = currentParams;
-
-
+				// Prepare parameters controlling the interpolation.
 				ControlParameters controlParameters;
-
 				for (int i = 0; i < 16; ++i) {
-								const int visibilityIndex =
-												std::min(interInterpolationParams.visibilityParam.index + i / 8,
-																int(visibilitiesRad.size() - 1));
+								const int visibilityIndex = std::min(frameIterParams.visibility.index + i / 8, int(visibilitiesRad.size() - 1));
+								const int albedoIndex = std::min(frameIterParams.albedo.index + (i % 8) / 4, int(albedosRad.size() - 1));
+								const int altitudeIndex = std::min(frameIterParams.altitude.index + (i % 4) / 2, int(altitudesRad.size() - 1));
+								const int elevationIndex = std::min(frameIterParams.elevation.index + i % 2, int(elevationsRad.size() - 1));
 
-								const int albedoIndex =
-												std::min(interInterpolationParams.albedoParam.index + (i % 8) / 4,
-																int(albedosRad.size() - 1));
-
-								const int altitudeIndex =
-												std::min(interInterpolationParams.altitudeParam.index + (i % 4) / 2,
-																int(altitudesRad.size() - 1));
-
-								const int elevationIndex =
-												std::min(interInterpolationParams.elevationParam.index + i % 2,
-																int(elevationsRad.size() - 1));
-
-								controlParameters.coefficients[i] =
-												getCoefficients(dataRad,
-																metadataRad.totalCoefsSingleConfig,
-																elevationIndex,
-																altitudeIndex,
-																visibilityIndex,
-																albedoIndex,
-																channelIndex);
+								controlParameters.coefficients[i] = getCoefficients(dataRad,
+												metadataRad.totalCoefsSingleConfig,
+												elevationIndex,
+												altitudeIndex,
+												visibilityIndex,
+												albedoIndex,
+												channelIndex);
 				}
+				controlParameters.interpolationFactor[0] = frameIterParams.visibility.factor;
+				controlParameters.interpolationFactor[1] = frameIterParams.albedo.factor;
+				controlParameters.interpolationFactor[2] = frameIterParams.altitude.factor;
+				controlParameters.interpolationFactor[3] = frameIterParams.elevation.factor;
 
-				controlParameters.interpolationFactor[0] = interInterpolationParams.visibilityParam.factor;
-				controlParameters.interpolationFactor[1] = interInterpolationParams.albedoParam.factor;
-				controlParameters.interpolationFactor[2] = interInterpolationParams.altitudeParam.factor;
-				controlParameters.interpolationFactor[3] = interInterpolationParams.elevationParam.factor;
-
-				const double result =
-								interpolate<0, 0>(
-												interInterpolationParams.angleParameters,
-												controlParameters,
-												metadataRad);
-
-				assert(result >= 0.0);
+				// Interpolate.
+				const double result = interpolate<0, 0>(pixelIterParams.angle, controlParameters, metadataRad);
+				assert(metadata.emphBreaks.empty() || result >= 0.0); // polarisation can be negative
 
 				return result;
 }

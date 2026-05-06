@@ -41,48 +41,61 @@
 /// simple Vector3 class to simplify working with points and directions and expects using this class when
 /// passing viewing point and direction to the computeParameters method.
 class RealtimeSkyModel {
+public:
+				struct PixelInterpolationParameters {
+								double gamma;
+								double theta;
+								double shadow;
+								double zero;
+								AngleParameters angle;
+				};
+
+				struct FrameInterpolationParameters {
+								InterpolationParameter elevation;
+								InterpolationParameter altitude;
+								InterpolationParameter visibility;
+								InterpolationParameter albedo;
+				};
+
 private:
 				/////////////////////////////////////////////////////////////////////////////////////
 				// Private types
 				/////////////////////////////////////////////////////////////////////////////////////
-				struct RawParameters {
-								Vector3 viewpoint;
-								Vector3 viewDirection;
-								double groundLevelSolarElevationAtOrigin;
-								double groundLevelSolarAzimuthAtOrigin;
-								double visibility;
-								double albedo;
-				};
+				struct FrameParameters {
+								/// Sun elevation at view point in radians, supported values in range [-0.073, PI/2] (for full
+								/// dataset). For view points above ground differs from the ground level sun elevation expected by the
+								/// computeParameters method.
+								double elevation;
 
-				struct IntermediateParameters {
+								/// Altitude of view point in meters, supported values in range [0, 15000] (for full dataset).
+								double altitude;
+
+								/// Horizontal visibility (meteorological range) at ground level in kilometers, supported values in
+								/// range [20, 131.8] (for full dataset).
+								double visibility;
+
+								/// Ground albedo, supported values in range [0, 1] (for full dataset).
+								double albedo;
+
+								double distanceToView;
+								Vector3 directionToSunN;
 								Vector3 toViewpointN;
 								Vector3 shiftedViewpoint;
-								Vector3 viewDirectionN;
-								Vector3 directionToSunN;
 								Vector3 shadowDirectionN;
-								Vector3 correctViewN;
-								double distanceToView;
-				};
-
-				struct IntermediateInterpolationParameter {
-								AngleParameters angleParameters;
-
-								InterpolationParameter visibilityParam;
-								InterpolationParameter albedoParam;
-								InterpolationParameter altitudeParam;
-								InterpolationParameter elevationParam;
-
-								bool initialized = false;
 				};
 
 				/////////////////////////////////////////////////////////////////////////////////////
 				// Private data
-				/////////////////////////////////////////////////////////////////////////////////////
+				/////////////////////////////////////////////////////////////////////////////////////	
 				int    channels;
 				double channelStart;
 				double channelWidth;
 
 				bool initialized;
+				bool initializedFrameParams;
+
+				// Cached parameters
+				FrameParameters frameParams;
 
 				// Total number of configurations
 				int totalConfigs;
@@ -141,20 +154,11 @@ private:
 				std::vector<float> dataTransU;
 				std::vector<float> dataTransV;
 
-				// Cached parameters
-				std::optional<RawParameters> prevRawParams;
-
-				IntermediateParameters interParams;
-				mutable IntermediateInterpolationParameter interInterpolationParams;
-
-				mutable std::optional<Parameters> prevParams;
-				std::optional<Parameters> currentParams;
-
 				/////////////////////////////////////////////////////////////////////////////////////
 				// Public methods
 				/////////////////////////////////////////////////////////////////////////////////////
 public:
-				RealtimeSkyModel() : initialized(false) {};
+				RealtimeSkyModel() : initialized(false), initializedFrameParams(false) {};
 
 				/// Prepares the model and loads the given dataset file into memory.
 				///
@@ -190,8 +194,11 @@ public:
 								const double   visibility,
 								const double   albedo) const;
 
-				void setParameters(const Vector3& viewPoint,
-								const Vector3& viewDirection,
+				PixelInterpolationParameters computePixelInterpolationParameters(
+								const Vector3& viewDirection) const;
+
+				FrameInterpolationParameters computeFrameInterpolationParameters(
+								const Vector3& viewpoint,
 								const double   groundLevelSolarElevationAtOrigin,
 								const double   groundLevelSolarAzimuthAtOrigin,
 								const double   visibility,
@@ -203,7 +210,10 @@ public:
 								/// Throws NotInitializedException if called without initializing the model first.
 				double skyRadiance(const Parameters& params, const double wavelength) const;
 
-				double skyRadiance(const double wavelength) const;
+				double skyRadiance(
+								const PixelInterpolationParameters& pixelIterParams,
+								const FrameInterpolationParameters& frameIterParams,
+								const double wavelength) const;
 
 				/// Computes sun radiance only (without radiance inscattered from the sky) for given parameters and
 				/// wavelength (full dataset supports wavelengths from 280 nm to 2480 nm).
